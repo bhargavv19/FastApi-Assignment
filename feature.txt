@@ -1,0 +1,65 @@
+FastAPI Chat Application with Branching - Feature Summary
+
+Overview:
+A backend chat service built with FastAPI, supporting conversation branching, user authentication, and dual-database storage (PostgreSQL + MongoDB). Designed as a microservice with RESTful APIs and caching for performance optimization.
+
+Core Features:
+
+1. Chat Management
+- Create new chat conversations with unique UUIDs
+- Associate chats with user accounts
+- Retrieve chat details with full message history
+- Update chat metadata (name, type, active status)
+- Soft-delete chats
+
+2. Message Handling
+- Add text-based messages to existing chats
+- Messages are timestamped and stored in MongoDB
+- Retrieve messages in correct chronological order
+
+3. Branching Functionality
+- Branch conversations from any message in chat history
+- Maintain parent-child relationships between branches
+- Switch between active branches in a conversation
+- Retrieve a full branch tree for any chat
+
+4. Authentication
+- Basic account-based authentication system
+- All endpoints protected using authentication middleware
+
+5. Database Design
+- PostgreSQL (via SQLAlchemy + Alembic) stores:
+  - Chat metadata (chat_id, account_id, name, type, timestamps, etc.)
+  - Conversation records
+- MongoDB (via Motor) stores:
+  - Chat content (QA pairs, branches, timestamps, responses)
+
+6. Caching
+- Frequently accessed endpoints (e.g., get chat) cached using FastAPI-Cache
+- Reduces database load and improves response times
+
+7. API Endpoints (RESTful Design)
+- /api/v1/chats/create-chat          : Create a new chat
+- /api/v1/chats/get-chat             : Get chat details and messages
+- /api/v1/chats/update-chat          : Update chat metadata
+- /api/v1/chats/delete-chat          : Delete a chat
+- /api/v1/messages/add-message       : Add message to a chat
+- /api/v1/branches/create-branch     : Create branch from a message
+- /api/v1/branches/get-branches      : Get all branches for a chat
+- /api/v1/branches/set-active-branch : Set a specific branch as active
+
+8. Additional Features
+- Request validation using Pydantic models
+- Proper error handling and descriptive status codes
+- Database migrations with Alembic
+- Modular code structure for scalability and maintainability
+
+9. Testing
+- Unit tests for models and services
+- Integration tests for API endpoints
+- Test coverage for authentication, branching logic, and caching
+
+Deployment & Tooling:
+- Dockerized setup (optional)
+- Postman collection included for API testing
+- README includes setup instructions, design decisions, and migration steps
