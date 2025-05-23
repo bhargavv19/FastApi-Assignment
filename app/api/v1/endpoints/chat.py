@@ -119,10 +119,17 @@ async def delete_chat(
     """
     Delete chat.
     """
+    # First get the chat to return it
+    chat = db.query(ChatModel).filter(ChatModel.id == chat_id).first()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    # Then delete it
     success = await crud.chat["delete_chat"](db=db, chat_id=chat_id, current_user_id=current_user.id)
     if not success:
         raise HTTPException(status_code=404, detail="Chat not found")
-    return {"status": "success"}
+    
+    return chat
 
 @router.post("/{chat_id}/messages", response_model=Message)
 async def create_message(
