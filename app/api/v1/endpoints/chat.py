@@ -11,6 +11,7 @@ from app.schemas.chat import Chat, ChatCreate, ChatUpdate, Message, MessageCreat
 from app.models.chat import Chat as ChatModel, chat_participants
 from app.services.mongodb.message_service import message_service
 from app.models.mongodb.message import MongoMessage
+from app.core.websocket import manager
 
 router = APIRouter()
 
@@ -187,7 +188,19 @@ async def create_message(
         "created_at": sender.created_at
     }
     
-    return Message.model_validate(message_dict)
+    # Create the message response
+    message_response = Message.model_validate(message_dict)
+    
+    # Broadcast the new message to all chat participants
+    await manager.broadcast_to_chat(
+        {
+            "type": "new_message",
+            "data": message_response.model_dump()
+        },
+        chat_id
+    )
+    
+    return message_response
 
 @router.get("/{chat_id}/participants", response_model=List[dict])
 async def get_chat_participants(

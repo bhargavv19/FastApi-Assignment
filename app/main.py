@@ -28,7 +28,12 @@ app.add_middleware(
         "sec-ch-ua",
         "sec-ch-ua-mobile",
         "sec-ch-ua-platform",
-        "Referer"
+        "Referer",
+        "Connection",
+        "Upgrade",
+        "Sec-WebSocket-Key",
+        "Sec-WebSocket-Version",
+        "Sec-WebSocket-Protocol"
     ],
     expose_headers=["*"],
     max_age=3600
