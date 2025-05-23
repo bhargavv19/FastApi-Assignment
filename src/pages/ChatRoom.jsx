@@ -23,6 +23,7 @@ import {
     Close as CloseIcon,
 } from '@mui/icons-material';
 import { chatAPI, messageAPI, branchAPI, authAPI } from '../services/api';
+import useWebSocket from '../hooks/useWebSocket';
 
 const ChatRoom = () => {
     const { chatId } = useParams();
@@ -34,12 +35,18 @@ const ChatRoom = () => {
     const [error, setError] = useState('');
     const messagesEndRef = useRef(null);
     const currentUser = JSON.parse(localStorage.getItem('user')) || null;
-    console.log(currentUser);
+    const [isTyping, setIsTyping] = useState(false);
+    const [typingUsers, setTypingUsers] = useState(new Set());
+
     // Thread-related state
     const [selectedMessage, setSelectedMessage] = useState(null);
     const [threadMessages, setThreadMessages] = useState([]);
     const [threadOpen, setThreadOpen] = useState(false);
     const [threadNewMessage, setThreadNewMessage] = useState('');
+
+    // Get token from localStorage or your auth system
+    const token = localStorage.getItem('token');
+    const { sendMessage, sendTypingIndicator, sendReadReceipt, ws } = useWebSocket(chatId, token);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -51,7 +58,6 @@ const ChatRoom = () => {
             const chatData = await chatAPI.getChat(chatId);
             setChat(chatData);
             const messagesData = await messageAPI.getMessages(chatId);
-            // Sort messages by created_at in ascending order (oldest to newest)
             const sortedMessages = messagesData ? [...messagesData].sort((a, b) =>
                 new Date(a.created_at) - new Date(b.created_at)
             ) : [];
@@ -72,35 +78,59 @@ const ChatRoom = () => {
         scrollToBottom();
     }, [messages]);
 
+    // WebSocket message handler
+    useEffect(() => {
+        if (!ws) return;
+
+        const handleMessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                switch (data.type) {
+                    case 'new_message':
+                        setMessages(prev => [...prev, data.data]);
+                        sendReadReceipt(data.data.id, currentUser?.id);
+                        break;
+                    case 'typing_indicator':
+                        if (data.data.is_typing) {
+                            setTypingUsers(prev => new Set([...prev, data.data.user_id]));
+                        } else {
+                            setTypingUsers(prev => {
+                                const newSet = new Set(prev);
+                                newSet.delete(data.data.user_id);
+                                return newSet;
+                            });
+                        }
+                        break;
+                    case 'read_receipt':
+                        setMessages(prev => prev.map(msg =>
+                            msg.id === data.data.message_id
+                                ? { ...msg, read_by: [...(msg.read_by || []), data.data.user_id] }
+                                : msg
+                        ));
+                        break;
+                    default:
+                        console.log('Unknown message type:', data.type);
+                }
+            } catch (error) {
+                console.error('Error parsing WebSocket message:', error);
+            }
+        };
+
+        ws.addEventListener('message', handleMessage);
+        return () => ws.removeEventListener('message', handleMessage);
+    }, [ws, currentUser?.id, sendReadReceipt]);
+
     const handleSendMessage = async (e) => {
         e.preventDefault();
         if (!newMessage.trim()) return;
 
         try {
-            const messageData = {
-                content: newMessage,
-                message_type: "text", // or you can make this dynamic based on message type
-                parent_message_id: null,
-                chat_id: chatId
-            };
-
-            const response = await messageAPI.addMessage(chatId, messageData);
-            setMessages(prev => [...prev, response]);
+            sendMessage(newMessage);
             setNewMessage('');
+            setIsTyping(false);
+            sendTypingIndicator(false, currentUser?.id);
         } catch (err) {
             setError('Failed to send message');
-        }
-    };
-
-    const handleMessageClick = async (message) => {
-        setSelectedMessage(message);
-        setThreadOpen(true);
-        try {
-            const threadData = await branchAPI.getBranches(chatId, message.id);
-            console.log(threadData);
-            setThreadMessages(threadData || []);
-        } catch (err) {
-            setError('Failed to load thread messages');
         }
     };
 
@@ -109,18 +139,28 @@ const ChatRoom = () => {
         if (!threadNewMessage.trim()) return;
 
         try {
-            const messageData = {
-                content: threadNewMessage,
-                message_type: "text",
-                parent_message_id: selectedMessage.id,
-                chat_id: chatId
-            };
-
-            const response = await messageAPI.addMessage(chatId, messageData);
-            setThreadMessages(prev => [...prev, response]);
+            sendMessage(threadNewMessage, selectedMessage.id);
             setThreadNewMessage('');
         } catch (err) {
             setError('Failed to send thread message');
+        }
+    };
+
+    const handleMessageClick = async (message) => {
+        setSelectedMessage(message);
+        setThreadOpen(true);
+        try {
+            const threadData = await branchAPI.getBranches(chatId, message.id);
+            setThreadMessages(threadData || []);
+        } catch (err) {
+            setError('Failed to load thread messages');
+        }
+    };
+
+    const handleTyping = () => {
+        if (!isTyping) {
+            setIsTyping(true);
+            sendTypingIndicator(true, currentUser?.id);
         }
     };
 
@@ -227,17 +267,32 @@ const ChatRoom = () => {
                                                 <Typography variant="body1" sx={{ mb: 0.5 }}>
                                                     {message.content}
                                                 </Typography>
-                                                <Typography
-                                                    variant="caption"
-                                                    color="text.secondary"
-                                                    sx={{
-                                                        mt: 0.5,
-                                                        display: 'block',
-                                                        textAlign: isCurrentUser ? 'right' : 'left'
-                                                    }}
-                                                >
-                                                    {new Date(message.created_at).toLocaleString()}
-                                                </Typography>
+                                                <Box sx={{
+                                                    display: 'flex',
+                                                    justifyContent: isCurrentUser ? 'flex-end' : 'flex-start',
+                                                    alignItems: 'center',
+                                                    gap: 1
+                                                }}>
+                                                    <Typography
+                                                        variant="caption"
+                                                        color="text.secondary"
+                                                    >
+                                                        {new Date(message.created_at).toLocaleString()}
+                                                    </Typography>
+                                                    {isCurrentUser && message.read_by && (
+                                                        <Typography
+                                                            variant="caption"
+                                                            color="text.secondary"
+                                                            sx={{
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: 0.5
+                                                            }}
+                                                        >
+                                                            {message.read_by.length > 0 ? '✓✓' : '✓'}
+                                                        </Typography>
+                                                    )}
+                                                </Box>
                                             </Box>
                                         </ListItem>
                                         <Divider />
@@ -248,6 +303,51 @@ const ChatRoom = () => {
                         </List>
                     </Paper>
 
+                    {typingUsers.size > 0 && (
+                        <Box sx={{
+                            mb: 1,
+                            px: 2,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1
+                        }}>
+                            <Typography variant="caption" color="text.secondary">
+                                {Array.from(typingUsers).map(userId => {
+                                    const user = chat?.participants?.find(p => p.id === userId);
+                                    return user?.username || 'Someone';
+                                }).join(', ')}
+                                {typingUsers.size === 1 ? ' is' : ' are'} typing...
+                            </Typography>
+                            <Box sx={{
+                                display: 'flex',
+                                gap: 0.5,
+                                animation: 'typing 1s infinite'
+                            }}>
+                                <Box sx={{
+                                    width: 4,
+                                    height: 4,
+                                    borderRadius: '50%',
+                                    bgcolor: 'text.secondary',
+                                    animation: 'typing 1s infinite 0.2s'
+                                }} />
+                                <Box sx={{
+                                    width: 4,
+                                    height: 4,
+                                    borderRadius: '50%',
+                                    bgcolor: 'text.secondary',
+                                    animation: 'typing 1s infinite 0.4s'
+                                }} />
+                                <Box sx={{
+                                    width: 4,
+                                    height: 4,
+                                    borderRadius: '50%',
+                                    bgcolor: 'text.secondary',
+                                    animation: 'typing 1s infinite 0.6s'
+                                }} />
+                            </Box>
+                        </Box>
+                    )}
+
                     <Box component="form" onSubmit={handleSendMessage} sx={{ display: 'flex', gap: 1, mt: 1 }}>
                         <TextField
                             fullWidth
@@ -255,6 +355,7 @@ const ChatRoom = () => {
                             placeholder="Type your message..."
                             value={newMessage}
                             onChange={(e) => setNewMessage(e.target.value)}
+                            onKeyPress={handleTyping}
                             sx={{ background: '#f5f7fa', borderRadius: 2 }}
                         />
                         <Button
@@ -267,6 +368,15 @@ const ChatRoom = () => {
                             Send
                         </Button>
                     </Box>
+
+                    <style>
+                        {`
+                            @keyframes typing {
+                                0%, 100% { transform: translateY(0); }
+                                50% { transform: translateY(-4px); }
+                            }
+                        `}
+                    </style>
                 </Paper>
             </Container>
 
