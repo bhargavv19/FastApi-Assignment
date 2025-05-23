@@ -47,7 +47,7 @@ async def login(
         
         # Authenticate user
         user = authenticate(
-            db, email=form_data.username, password=form_data.password
+        db, email=form_data.username, password=form_data.password
         )
         if not user:
             logger.warning(f"Authentication failed for user: {form_data.username}")
@@ -62,16 +62,16 @@ async def login(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Inactive user"
             )
-        
-        # Create access token
+            
+            # Create access token
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = security.create_access_token(
-            user.id, expires_delta=access_token_expires
-        )
+                user.id, expires_delta=access_token_expires
+            )
         logger.info(f"Login successful for user: {form_data.username}")
         return {
             "access_token": access_token,
-            "token_type": "bearer",
+        "token_type": "bearer",
         }
     except HTTPException:
         # Re-raise HTTP exceptions as they are already properly formatted
@@ -114,11 +114,11 @@ async def register(
         # Check if username exists
         user = get_by_username(db, username=user_in.username)
         if user:
-            logger.warning(f"Registration failed: Username {user_in.username} already taken")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The username is already taken."
-            )
+                logger.warning(f"Registration failed: Username {user_in.username} already taken")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="The username is already taken."
+                )
         
         # Create user
         logger.info(f"Creating new user with username: {user_in.username}")
@@ -133,4 +133,4 @@ async def register(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e)
-        ) 
+        )

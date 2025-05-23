@@ -37,7 +37,7 @@ class CRUDChat(CRUDBase[Chat, ChatCreate, ChatUpdate]):
                 chat_participants.select().where(
                     chat_participants.c.chat_id == chat_id,
                     chat_participants.c.user_id == user_id
-                )
+            )
             ).first()
             
             if not result:
@@ -66,7 +66,7 @@ class CRUDChat(CRUDBase[Chat, ChatCreate, ChatUpdate]):
         stmt = chat_participants.delete().where(
             chat_participants.c.chat_id == chat_id,
             chat_participants.c.user_id == user_id
-        )
+            )
         db.execute(stmt)
         db.commit()
 
@@ -254,7 +254,7 @@ async def get_chat_messages(
     
     return db.query(Message).filter(
         Message.chat_id == chat_id
-    ).order_by(Message.created_at.desc()).offset(skip).limit(limit).all()
+    ).order_by(Message.created_at.desc()).offset(skip).limit(limit).all() 
 
 def get(db: Session, id: uuid.UUID) -> Optional[Chat]:
     return db.query(Chat).filter(Chat.id == id).first()

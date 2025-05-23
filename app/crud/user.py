@@ -34,7 +34,7 @@ def create(db: Session, *, obj_in: UserCreate) -> User:
         logger.info(f"Creating user with email: {obj_in.email} and username: {obj_in.username}")
         db_obj = User(
             email=obj_in.email,
-            username=obj_in.username,
+                username=obj_in.username,
             hashed_password=get_password_hash(obj_in.password),
             is_active=True,
         )
@@ -65,7 +65,7 @@ def update(
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)
-        return db_obj
+        return db_obj 
     except Exception as e:
         logger.error(f"Error updating user: {str(e)}", exc_info=True)
         db.rollback()

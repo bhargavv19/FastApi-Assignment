@@ -1,5 +1,6 @@
 from typing import List, Optional
 from uuid import UUID
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -8,7 +9,8 @@ from app import crud
 from app.api import deps
 from app.schemas.chat import Chat, ChatCreate, ChatUpdate, Message, MessageCreate, MessageUpdate
 from app.models.chat import Chat as ChatModel, chat_participants
-from app.models.message import Message as MessageModel
+from app.services.mongodb.message_service import message_service
+from app.models.mongodb.message import MongoMessage
 
 router = APIRouter()
 
@@ -143,34 +145,26 @@ async def create_message(
     # Validate parent message if provided
     parent_message_id = message_in.parent_message_id
     if parent_message_id:
-        parent_message = db.query(MessageModel).filter(
-            MessageModel.id == parent_message_id,
-            MessageModel.chat_id == chat_id
-        ).first()
-        if not parent_message:
+        parent_message = await message_service.get_message(parent_message_id)
+        if not parent_message or parent_message.chat_id != chat_id:
             raise HTTPException(
                 status_code=404,
                 detail=f"Parent message {parent_message_id} not found in chat {chat_id}"
             )
     
-    # Create message with sender_id
-    message_data = message_in.model_dump(exclude_unset=True)  # Only include fields that were set
-    message_data["sender_id"] = current_user.id
-    message_data["chat_id"] = chat_id
-    
-    # Create message using the SQLAlchemy model
-    message = MessageModel(
-        content=message_data["content"],
-        message_type=message_data["message_type"],
-        chat_id=message_data["chat_id"],
-        sender_id=message_data["sender_id"],
-        parent_message_id=message_data.get("parent_message_id")  # This will be None if not provided
+    # Create message in MongoDB
+    mongo_message = MongoMessage(
+        chat_id=chat_id,
+        sender_id=current_user.id,
+        content=message_in.content,
+        message_type=message_in.message_type,
+        parent_message_id=parent_message_id,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
     )
     
-    db.add(message)
-    db.commit()
-    db.refresh(message)
-    return message
+    created_message = await message_service.create_message(mongo_message)
+    return Message.model_validate(created_message.model_dump())
 
 @router.get("/{chat_id}/participants", response_model=List[dict])
 async def get_chat_participants(
@@ -229,13 +223,14 @@ async def read_messages(
                 detail=f"User {current_user.id} is not a participant in chat {chat_id}"
             )
     
-    # Get messages
-    messages = db.query(MessageModel).filter(
-        MessageModel.chat_id == chat_id,
-        MessageModel.deleted_at.is_(None)
-    ).order_by(MessageModel.created_at.desc()).offset(skip).limit(limit).all()
+    # Get messages from MongoDB
+    messages = await message_service.get_chat_messages(
+        chat_id=chat_id,
+        skip=skip,
+        limit=limit
+    )
     
-    return messages
+    return [Message.model_validate(msg) for msg in messages]
 
 @router.put("/{chat_id}/messages/{message_id}", response_model=Message)
 async def update_message(
@@ -249,13 +244,20 @@ async def update_message(
     """
     Update message.
     """
-    message = crud.message.get(db=db, id=message_id)
+    message = await message_service.get_message(message_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
     if message.sender_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
-    message = crud.message.update(db=db, db_obj=message, obj_in=message_in)
-    return message
+    
+    updated_message = await message_service.update_message(
+        message_id=message_id,
+        update_data=message_in.model_dump(exclude_unset=True)
+    )
+    if not updated_message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    return Message.model_validate(updated_message)
 
 @router.delete("/{chat_id}/messages/{message_id}", response_model=Message)
 async def delete_message(
@@ -268,13 +270,17 @@ async def delete_message(
     """
     Delete message.
     """
-    message = crud.message.get(db=db, id=message_id)
+    message = await message_service.get_message(message_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
     if message.sender_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
-    message = crud.message.remove(db=db, id=message_id)
-    return message
+    
+    success = await message_service.delete_message(message_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    return Message.model_validate(message)
 
 @router.get("/{chat_id}/messages/{message_id}/thread", response_model=List[Message])
 async def get_message_thread(
@@ -294,23 +300,13 @@ async def get_message_thread(
     if not participant:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    # Get the message
-    message = db.query(MessageModel).filter(
-        MessageModel.id == message_id,
-        MessageModel.chat_id == chat_id
-    ).first()
+    # Get thread messages from MongoDB
+    thread_messages = await message_service.get_message_thread(
+        chat_id=chat_id,
+        message_id=message_id
+    )
     
-    if not message:
-        raise HTTPException(status_code=404, detail="Message not found")
-    
-    # Get all messages in the thread
-    thread_messages = db.query(MessageModel).filter(
-        MessageModel.chat_id == chat_id,
-        MessageModel.parent_message_id == message_id
-    ).order_by(MessageModel.created_at).all()
-    
-    # Add the parent message to the beginning of the list
-    return [message] + thread_messages
+    return [Message.model_validate(msg) for msg in thread_messages]
 
 @router.get("/{chat_id}/branches", response_model=List[Message])
 async def get_chat_branches(
@@ -329,14 +325,10 @@ async def get_chat_branches(
     if not participant:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    # Get all root messages
-    root_messages = db.query(MessageModel).filter(
-        MessageModel.chat_id == chat_id,
-        MessageModel.parent_message_id.is_(None),
-        MessageModel.deleted_at.is_(None)
-    ).order_by(MessageModel.created_at.desc()).all()
+    # Get root messages from MongoDB
+    root_messages = await message_service.get_chat_branches(chat_id=chat_id)
     
-    return root_messages
+    return [Message.model_validate(msg) for msg in root_messages]
 
 @router.get("/{chat_id}/messages/{message_id}/branch", response_model=List[Message])
 async def get_message_branch(
@@ -356,20 +348,10 @@ async def get_message_branch(
     if not participant:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    # Get the message
-    message = db.query(MessageModel).filter(
-        MessageModel.id == message_id,
-        MessageModel.chat_id == chat_id
-    ).first()
+    # Get branch messages from MongoDB
+    branch_messages = await message_service.get_message_branch(
+        chat_id=chat_id,
+        message_id=message_id
+    )
     
-    if not message:
-        raise HTTPException(status_code=404, detail="Message not found")
-    
-    # Get all messages in the branch
-    branch_messages = db.query(MessageModel).filter(
-        MessageModel.chat_id == chat_id,
-        MessageModel.parent_message_id == message_id
-    ).order_by(MessageModel.created_at).all()
-    
-    # Add the parent message to the beginning of the list
-    return [message] + branch_messages 
+    return [Message.model_validate(msg) for msg in branch_messages] 
