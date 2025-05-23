@@ -46,7 +46,7 @@ const ChatRoom = () => {
 
     // Get token from localStorage or your auth system
     const token = localStorage.getItem('token');
-    const { sendMessage, sendTypingIndicator, sendReadReceipt, ws } = useWebSocket(chatId, token);
+    const { sendMessage, sendTypingIndicator, sendReadReceipt, ws } = useWebSocket(chatId, token, currentUser?.id);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

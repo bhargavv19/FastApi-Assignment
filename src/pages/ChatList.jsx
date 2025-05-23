@@ -45,6 +45,7 @@ const ChatList = () => {
     const [editingChat, setEditingChat] = useState(null);
     const [chatName, setChatName] = useState('');
     const [selectedUsers, setSelectedUsers] = useState([]);
+    const currentUser = JSON.parse(localStorage.getItem('user')) || null;
 
     const fetchUsers = async () => {
         try {
@@ -74,7 +75,7 @@ const ChatList = () => {
 
     const handleCreateChat = async () => {
         try {
-            await chatAPI.createChat(chatName, 'single', true, selectedUsers);
+            await chatAPI.createChat(chatName, 'single', true, [...selectedUsers, currentUser.id]);
             setOpenDialog(false);
             setChatName('');
             setSelectedUsers([]);
