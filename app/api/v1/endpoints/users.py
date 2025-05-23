@@ -1,6 +1,7 @@
-from typing import Any, List
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Any, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from app import crud, models, schemas
 from app.api import deps
@@ -50,12 +51,28 @@ def read_user_by_id(
 @router.get("/", response_model=List[schemas.User])
 def read_users(
     db: Session = Depends(deps.get_db),
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=100, description="Number of records to return"),
+    search: Optional[str] = Query(None, description="Search term for username or email"),
     current_user = Depends(deps.get_current_user),
 ) -> Any:
     """
-    Retrieve users.
+    Retrieve users with optional search and pagination.
+    
+    - **skip**: Number of records to skip (for pagination)
+    - **limit**: Number of records to return (max 100)
+    - **search**: Optional search term to filter users by username or email
     """
-    users = crud.user["get_multi"](db, skip=skip, limit=limit)
+    query = db.query(models.User)
+    
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            or_(
+                models.User.username.ilike(search_term),
+                models.User.email.ilike(search_term)
+            )
+        )
+    
+    users = query.offset(skip).limit(limit).all()
     return users 

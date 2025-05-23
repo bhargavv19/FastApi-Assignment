@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
+from sqlalchemy.orm import Session
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import DESCENDING
@@ -8,6 +9,7 @@ from bson import Binary
 
 from app.core.config import settings
 from app.models.mongodb.message import MongoMessage
+from app.crud.user import get as get_user
 
 class MessageService:
     def __init__(self):
@@ -39,7 +41,17 @@ class MessageService:
 
     async def create_message(self, message: MongoMessage) -> MongoMessage:
         message_dict = self._serialize_message(message)
+        # Ensure all UUIDs are properly serialized
+        message_dict["id"] = str(message.id)
+        message_dict["chat_id"] = str(message.chat_id)
+        message_dict["sender_id"] = str(message.sender_id)
+        if message.parent_message_id:
+            message_dict["parent_message_id"] = str(message.parent_message_id)
+        
+        # Insert the message
         await self.collection.insert_one(message_dict)
+        
+        # Return the original message object
         return message
 
     async def get_message(self, message_id: UUID) -> Optional[MongoMessage]:
@@ -54,14 +66,88 @@ class MessageService:
         skip: int = 0, 
         limit: int = 100
     ) -> List[MongoMessage]:
+        print(f"Getting messages for chat_id: {chat_id}")  # Add logging
+        
+        # Get root messages (messages without parent)
         cursor = self.collection.find(
-            {"chat_id": self._serialize_uuid(chat_id), "deleted_at": None}
+            {
+                "chat_id": str(chat_id),
+                "parent_message_id": None,
+                "deleted_at": None
+            }
         ).sort("created_at", DESCENDING).skip(skip).limit(limit)
         
         messages = []
         async for message_dict in cursor:
-            messages.append(self._deserialize_message(message_dict))
+            try:
+                # Convert string UUIDs back to UUID objects
+                message_dict["id"] = UUID(message_dict["id"])
+                message_dict["chat_id"] = UUID(message_dict["chat_id"])
+                message_dict["sender_id"] = UUID(message_dict["sender_id"])
+                if message_dict.get("parent_message_id"):
+                    message_dict["parent_message_id"] = UUID(message_dict["parent_message_id"])
+                
+                root_message = self._deserialize_message(message_dict)
+                
+                # Get thread messages for this root message
+                thread_cursor = self.collection.find(
+                    {
+                        "chat_id": str(chat_id),
+                        "parent_message_id": str(root_message.id),
+                        "deleted_at": None
+                    }
+                ).sort("created_at", 1)
+                
+                thread_messages = []
+                async for thread_msg in thread_cursor:
+                    try:
+                        # Convert string UUIDs back to UUID objects
+                        thread_msg["id"] = UUID(thread_msg["id"])
+                        thread_msg["chat_id"] = UUID(thread_msg["chat_id"])
+                        thread_msg["sender_id"] = UUID(thread_msg["sender_id"])
+                        if thread_msg.get("parent_message_id"):
+                            thread_msg["parent_message_id"] = UUID(thread_msg["parent_message_id"])
+                        
+                        thread_messages.append(self._deserialize_message(thread_msg))
+                    except Exception as e:
+                        print(f"Error processing thread message: {str(e)}")  # Add logging
+                        continue
+                
+                # Add thread messages to the root message
+                root_message.thread_messages = thread_messages
+                messages.append(root_message)
+            except Exception as e:
+                print(f"Error processing root message: {str(e)}")  # Add logging
+                continue
+        
+        print(f"Found {len(messages)} messages")  # Add logging
         return messages
+
+    async def get_message_with_sender(self, message: MongoMessage, db: Session) -> dict:
+        """Get message with sender information."""
+        # Get sender information
+        sender = get_user(db=db, id=message.sender_id)
+        if not sender:
+            raise ValueError(f"Sender with ID {message.sender_id} not found")
+        
+        # Convert message to dict and add sender info
+        message_dict = message.model_dump()
+        message_dict["sender"] = {
+            "id": str(sender.id),
+            "username": sender.username,
+            "email": sender.email,
+            "is_active": sender.is_active,
+            "created_at": sender.created_at
+        }
+        
+        # Process thread messages if any
+        if message.thread_messages:
+            message_dict["thread_messages"] = [
+                await self.get_message_with_sender(thread_msg, db)
+                for thread_msg in message.thread_messages
+            ]
+        
+        return message_dict
 
     async def get_message_thread(
         self, 

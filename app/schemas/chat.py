@@ -66,7 +66,7 @@ class MessageInDBBase(MessageBase):
         from_attributes = True
 
 class Message(MessageInDBBase):
-    pass
+    sender: UserResponse
 
 class MessageResponse(MessageBase):
     id: UUID4
@@ -76,6 +76,7 @@ class MessageResponse(MessageBase):
     updated_at: datetime
     is_branch_root: bool
     sender: UserResponse
+    thread_messages: List['MessageResponse'] = []
 
     class Config:
         from_attributes = True

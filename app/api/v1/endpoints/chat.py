@@ -171,7 +171,23 @@ async def create_message(
     )
     
     created_message = await message_service.create_message(mongo_message)
-    return Message.model_validate(created_message.model_dump())
+    
+    # Get sender information
+    sender = crud.user["get"](db=db, id=current_user.id)
+    if not sender:
+        raise HTTPException(status_code=404, detail="Sender not found")
+    
+    # Convert message to dict and add sender info
+    message_dict = created_message.model_dump()
+    message_dict["sender"] = {
+        "id": str(sender.id),
+        "username": sender.username,
+        "email": sender.email,
+        "is_active": sender.is_active,
+        "created_at": sender.created_at
+    }
+    
+    return Message.model_validate(message_dict)
 
 @router.get("/{chat_id}/participants", response_model=List[dict])
 async def get_chat_participants(
@@ -237,7 +253,48 @@ async def read_messages(
         limit=limit
     )
     
-    return [Message.model_validate(msg) for msg in messages]
+    # Add sender information to each message
+    messages_with_sender = []
+    for message in messages:
+        try:
+            # Get sender information
+            sender = crud.user["get"](db=db, id=message.sender_id)
+            if not sender:
+                continue
+
+            # Convert message to dict and add sender info
+            message_dict = message.model_dump()
+            message_dict["sender"] = {
+                "id": str(sender.id),
+                "username": sender.username,
+                "email": sender.email,
+                "is_active": sender.is_active,
+                "created_at": sender.created_at
+            }
+
+            # Process thread messages if any
+            if message.thread_messages:
+                thread_messages = []
+                for thread_msg in message.thread_messages:
+                    thread_sender = crud.user["get"](db=db, id=thread_msg.sender_id)
+                    if thread_sender:
+                        thread_dict = thread_msg.model_dump()
+                        thread_dict["sender"] = {
+                            "id": str(thread_sender.id),
+                            "username": thread_sender.username,
+                            "email": thread_sender.email,
+                            "is_active": thread_sender.is_active,
+                            "created_at": thread_sender.created_at
+                        }
+                        thread_messages.append(thread_dict)
+                message_dict["thread_messages"] = thread_messages
+
+            messages_with_sender.append(Message.model_validate(message_dict))
+        except Exception as e:
+            print(f"Error processing message: {str(e)}")  # Add logging
+            continue
+    
+    return messages_with_sender
 
 @router.put("/{chat_id}/messages/{message_id}", response_model=Message)
 async def update_message(
@@ -313,7 +370,17 @@ async def get_message_thread(
         message_id=message_id
     )
     
-    return [Message.model_validate(msg) for msg in thread_messages]
+    # Add sender information to each message
+    messages_with_sender = []
+    for message in thread_messages:
+        try:
+            message_with_sender = await message_service.get_message_with_sender(message, db)
+            messages_with_sender.append(Message.model_validate(message_with_sender))
+        except ValueError as e:
+            # Skip messages with invalid sender
+            continue
+    
+    return messages_with_sender
 
 @router.get("/{chat_id}/branches", response_model=List[Message])
 async def get_chat_branches(
@@ -335,7 +402,17 @@ async def get_chat_branches(
     # Get root messages from MongoDB
     root_messages = await message_service.get_chat_branches(chat_id=chat_id)
     
-    return [Message.model_validate(msg) for msg in root_messages]
+    # Add sender information to each message
+    messages_with_sender = []
+    for message in root_messages:
+        try:
+            message_with_sender = await message_service.get_message_with_sender(message, db)
+            messages_with_sender.append(Message.model_validate(message_with_sender))
+        except ValueError as e:
+            # Skip messages with invalid sender
+            continue
+    
+    return messages_with_sender
 
 @router.get("/{chat_id}/messages/{message_id}/branch", response_model=List[Message])
 async def get_message_branch(
@@ -361,4 +438,14 @@ async def get_message_branch(
         message_id=message_id
     )
     
-    return [Message.model_validate(msg) for msg in branch_messages] 
+    # Add sender information to each message
+    messages_with_sender = []
+    for message in branch_messages:
+        try:
+            message_with_sender = await message_service.get_message_with_sender(message, db)
+            messages_with_sender.append(Message.model_validate(message_with_sender))
+        except ValueError as e:
+            # Skip messages with invalid sender
+            continue
+    
+    return messages_with_sender 

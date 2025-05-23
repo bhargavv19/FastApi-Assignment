@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,7 @@ class MongoMessage(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     deleted_at: Optional[datetime] = None
+    thread_messages: List['MongoMessage'] = []
 
     class Config:
         json_encoders = {
