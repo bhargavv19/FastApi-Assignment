@@ -1,0 +1,125 @@
+FastAPI Chat Application with Branching Functionality - Backend Developer Assignment
+Overview
+Assignment Description
+Create a microservice-based chat backend using FastAPI that allows users to create chat conversations and branch conversations from any point in the chat history. This simulates an chat application where users can explore different conversation paths.
+Requirements
+Core Functionality
+1.	Chat Creation
+•	Create a new chat conversation with a unique ID
+•	Associate chats with user accounts
+•	Store chat metadata and content
+2.	Message Handling
+•	Add messages to existing chats
+•	Retrieve chat history with proper ordering
+•	Support for text-based messages
+3.	Branching Functionality
+•	Create a new branch from any point in a conversation
+•	Maintain parent-child relationships between branches
+•	Allow switching between different branches
+•	Retrieve a complete tree of all branches for a conversation
+Technical Requirements
+1.	API Development
+•	Use FastAPI framework
+•	Implement proper request validation using Pydantic
+•	Create RESTful endpoints with appropriate HTTP methods
+•	Implement proper error handling and status codes
+2.	Database
+•	Use a dual database approach:
+•	SQL database (PostgreSQL) for chat metadata
+•	MongoDB for storing actual conversation content
+•	Design efficient schemas for both databases
+3.	Authentication
+•	Implement a simple authentication system
+•	Secure endpoints with authentication middleware
+4.	Performance
+•	Implement caching for frequently accessed data
+•	Ensure efficient database queries
+API Endpoints to Implement
+1.	Chat Management
+•	POST /api/v1/chats/create-chat
+ - Create a new chat
+•	GET /api/v1/chats/get-chat
+ - Get chat details and messages
+•	PUT /api/v1/chats/update-chat
+ - Update chat metadata
+•	DELETE /api/v1/chats/delete-chat
+ - Delete a chat
+2.	Message Management
+•	POST /api/v1/messages/add-message
+ - Add a message to a chat
+3.	Branch Management
+•	POST /api/v1/branches/create-branch
+ - Create a branch from a specific message
+•	GET /api/v1/branches/get-branches
+ - Get all branches for a chat
+•	PUT /api/v1/branches/set-active-branch
+ - Set a specific branch as active
+Data Models
+Design and implement the following data models:
+1.	Chat Record (SQL)
+•	chat_id (UUID)
+•	account_id (String)
+•	chat_type (Enum)
+•	name (String)
+•	created_at (DateTime)
+•	updated_at (DateTime)
+•	active (Boolean)
+2.	Conversation (SQL)
+•	chat_id (UUID, FK to Chat)
+•	account_id (String)
+•	name (String)
+•	deleted (Boolean)
+3.	Chat Content (MongoDB)
+json
+CopyInsert
+{
+  "chat_id": "uuid",
+  "qa_pairs": [
+    {
+      "question": "User question",
+      "response": "AI response",
+      "response_id": "unique_id",
+      "timestamp": "ISO datetime",
+      "branches": ["branch_chat_id1", "branch_chat_id2"]
+    }
+  ]
+}
+Technical Stack
+•	Framework: FastAPI
+•	Databases:
+•	PostgreSQL (with SQLAlchemy ORM)
+•	MongoDB
+•	Additional Libraries:
+•	Pydantic for data validation
+•	Alembic for database migrations
+•	Motor for async MongoDB access
+•	FastAPI-cache for caching
+Evaluation Criteria
+Your submission will be evaluated based on:
+1.	Functionality: Does the application meet all requirements?
+2.	Code Quality: Is the code well-structured, clean, and maintainable?
+3.	Database Design: Are the database schemas efficient and appropriate?
+4.	API Design: Are the APIs RESTful and well-documented?
+5.	Error Handling: Is error handling comprehensive and user-friendly?
+6.	Performance: Is the application optimized for performance?
+7.	Testing: Are there comprehensive tests?
+Submission Guidelines
+1.	Create a GitHub repository with your solution
+2.	Include a README with:
+•	Setup instructions
+•	API documentation
+•	Explanation of your design decisions
+3.	Include database migration scripts
+4.	Provide sample API requests (Postman collection or equivalent)
+5.	Include unit and integration tests
+Bonus Points
+•	Implementing WebSocket support for real-time messaging
+•	Adding a simple frontend demo using a React framework
+•	Implementing message search functionality
+•	Adding support for message types beyond text (links, code snippets)
+•	Containerizing the application with Docker
+Time Expectation
+We expect this assignment to take approximately 8-12 hours to complete. Focus on implementing the core functionality first before adding extra features.
+Good luck! We're excited to see your solution.
+
+

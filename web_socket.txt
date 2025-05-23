@@ -1,0 +1,397 @@
+WebSocket Integration Documentation
+================================
+
+1. WebSocket URLs
+----------------
+Base URL: ws://your-api-url/api/v1/ws
+
+1.1 Chat WebSocket
+-----------------
+URL: ws://your-api-url/api/v1/ws/chat/{chatId}?token={accessToken}
+Purpose: Real-time chat messages and updates
+Authentication: Required (JWT token as query parameter)
+
+1.2 Personal WebSocket
+---------------------
+URL: ws://your-api-url/api/v1/ws/{userId}
+Purpose: Personal notifications and direct messages
+Authentication: Required (JWT token as query parameter)
+
+2. Message Payloads
+------------------
+
+2.1 Sending Messages
+-------------------
+a) Chat Message:
+{
+    "type": "send_message",
+    "data": {
+        "content": "Your message content",
+        "message_type": "text",
+        "parent_message_id": null  // Optional, for replies
+    }
+}
+
+b) Direct Message:
+{
+    "type": "direct_message",
+    "data": {
+        "content": "Your direct message",
+        "message_type": "text",
+        "recipient_id": "recipient-user-uuid",
+        "chat_id": "chat-uuid-here"
+    }
+}
+
+2.2 Receiving Messages
+---------------------
+a) New Chat Message:
+{
+    "type": "new_message",
+    "data": {
+        "id": "uuid",
+        "chat_id": "uuid",
+        "sender_id": "uuid",
+        "content": "Message content",
+        "message_type": "text",
+        "parent_message_id": null,
+        "created_at": "timestamp",
+        "updated_at": "timestamp",
+        "sender": {
+            "id": "uuid",
+            "username": "username",
+            "email": "email@example.com",
+            "is_active": true,
+            "created_at": "timestamp"
+        }
+    }
+}
+
+b) Direct Message Notification:
+{
+    "type": "new_direct_message",
+    "data": {
+        // Same structure as new_message
+    }
+}
+
+3. React Implementation
+----------------------
+
+3.1 WebSocket Service
+--------------------
+// src/services/websocket.js
+
+class WebSocketService {
+    constructor() {
+        this.ws = null;
+        this.messageHandlers = new Set();
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+    }
+
+    connect(chatId, token) {
+        const wsUrl = `ws://your-api-url/api/v1/ws/chat/${chatId}?token=${token}`;
+        this.ws = new WebSocket(wsUrl);
+        this.chatId = chatId;
+        this.token = token;
+
+        this.ws.onopen = () => {
+            console.log('WebSocket Connected');
+            this.reconnectAttempts = 0;
+        };
+
+        this.ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                this.messageHandlers.forEach(handler => handler(data));
+            } catch (error) {
+                console.error('Error parsing message:', error);
+            }
+        };
+
+        this.ws.onerror = (error) => {
+            console.error('WebSocket Error:', error);
+            this.handleError(error);
+        };
+
+        this.ws.onclose = () => {
+            console.log('WebSocket Disconnected');
+            this.reconnect();
+        };
+    }
+
+    sendMessage(content, parentMessageId = null) {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            throw new Error('WebSocket is not connected');
+        }
+
+        const message = {
+            type: "send_message",
+            data: {
+                content,
+                message_type: "text",
+                parent_message_id: parentMessageId
+            }
+        };
+
+        this.ws.send(JSON.stringify(message));
+    }
+
+    sendTypingIndicator(isTyping) {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+        const message = {
+            type: "typing_indicator",
+            data: {
+                is_typing: isTyping,
+                user_id: this.userId
+            }
+        };
+
+        this.ws.send(JSON.stringify(message));
+    }
+
+    sendReadReceipt(messageId) {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+        const message = {
+            type: "read_receipt",
+            data: {
+                message_id: messageId,
+                user_id: this.userId
+            }
+        };
+
+        this.ws.send(JSON.stringify(message));
+    }
+
+    addMessageHandler(handler) {
+        this.messageHandlers.add(handler);
+    }
+
+    removeMessageHandler(handler) {
+        this.messageHandlers.delete(handler);
+    }
+
+    handleError(error) {
+        if (error.type === 'error') {
+            console.error('WebSocket Error:', error);
+            this.reconnect();
+        }
+    }
+
+    reconnect() {
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            setTimeout(() => {
+                console.log(`Reconnecting... Attempt ${this.reconnectAttempts}`);
+                this.connect(this.chatId, this.token);
+            }, Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000));
+        } else {
+            console.error('Max reconnection attempts reached');
+        }
+    }
+
+    disconnect() {
+        if (this.ws) {
+            this.ws.close();
+        }
+    }
+}
+
+export const websocketService = new WebSocketService();
+
+3.2 React Chat Component
+-----------------------
+// src/components/Chat.jsx
+
+import React, { useEffect, useState, useCallback } from 'react';
+import { websocketService } from '../services/websocket';
+
+const Chat = ({ chatId, token, currentUser }) => {
+    const [messages, setMessages] = useState([]);
+    const [newMessage, setNewMessage] = useState('');
+    const [isTyping, setIsTyping] = useState(false);
+    const [typingUsers, setTypingUsers] = useState(new Set());
+
+    useEffect(() => {
+        // Connect to WebSocket
+        websocketService.connect(chatId, token);
+
+        // Message handler
+        const handleNewMessage = (data) => {
+            switch (data.type) {
+                case 'new_message':
+                    setMessages(prev => [...prev, data.data]);
+                    // Send read receipt
+                    websocketService.sendReadReceipt(data.data.id);
+                    break;
+                case 'typing_indicator':
+                    handleTypingIndicator(data.data);
+                    break;
+                case 'read_receipt':
+                    handleReadReceipt(data.data);
+                    break;
+                default:
+                    console.log('Unknown message type:', data.type);
+            }
+        };
+
+        websocketService.addMessageHandler(handleNewMessage);
+
+        // Cleanup
+        return () => {
+            websocketService.removeMessageHandler(handleNewMessage);
+            websocketService.disconnect();
+        };
+    }, [chatId, token]);
+
+    const handleTypingIndicator = useCallback((data) => {
+        if (data.is_typing) {
+            setTypingUsers(prev => new Set([...prev, data.user_id]));
+        } else {
+            setTypingUsers(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(data.user_id);
+                return newSet;
+            });
+        }
+    }, []);
+
+    const handleReadReceipt = useCallback((data) => {
+        setMessages(prev => prev.map(msg => 
+            msg.id === data.message_id
+                ? { ...msg, read_by: [...(msg.read_by || []), data.user_id] }
+                : msg
+        ));
+    }, []);
+
+    const handleSendMessage = (e) => {
+        e.preventDefault();
+        if (newMessage.trim()) {
+            websocketService.sendMessage(newMessage);
+            setNewMessage('');
+            setIsTyping(false);
+            websocketService.sendTypingIndicator(false);
+        }
+    };
+
+    const handleTyping = () => {
+        if (!isTyping) {
+            setIsTyping(true);
+            websocketService.sendTypingIndicator(true);
+        }
+    };
+
+    return (
+        <div className="chat-container">
+            <div className="messages">
+                {messages.map(message => (
+                    <div key={message.id} className="message">
+                        <div className="sender">{message.sender.username}</div>
+                        <div className="content">{message.content}</div>
+                        <div className="timestamp">
+                            {new Date(message.created_at).toLocaleTimeString()}
+                        </div>
+                        {message.read_by && (
+                            <div className="read-receipts">
+                                Read by: {message.read_by.length} users
+                            </div>
+                        )}
+                    </div>
+                ))}
+            </div>
+            
+            {typingUsers.size > 0 && (
+                <div className="typing-indicator">
+                    {Array.from(typingUsers).join(', ')} is typing...
+                </div>
+            )}
+            
+            <form onSubmit={handleSendMessage}>
+                <input
+                    type="text"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    onKeyPress={handleTyping}
+                    placeholder="Type a message..."
+                />
+                <button type="submit">Send</button>
+            </form>
+        </div>
+    );
+};
+
+export default Chat;
+
+4. Security Considerations
+-------------------------
+1. Always use wss:// in production
+2. Implement token refresh mechanism
+3. Validate message content before sending
+4. Implement rate limiting
+5. Handle WebSocket disconnections gracefully
+6. Sanitize user input
+7. Implement message encryption for sensitive data
+
+5. Error Handling
+----------------
+1. Connection errors
+2. Message parsing errors
+3. Authentication errors
+4. Rate limiting errors
+5. Network timeouts
+
+6. Best Practices
+----------------
+1. Implement reconnection logic with exponential backoff
+2. Keep WebSocket connection alive with ping/pong
+3. Handle message queuing when offline
+4. Implement message delivery status
+5. Handle large message payloads
+6. Implement message compression for large payloads
+7. Handle browser tab visibility changes
+
+7. Testing
+----------
+1. Test WebSocket connection
+2. Test message sending/receiving
+3. Test reconnection logic
+4. Test error handling
+5. Test performance with large message volumes
+6. Test concurrent connections
+7. Test message ordering
+
+8. Monitoring
+------------
+1. Monitor WebSocket connections
+2. Monitor message throughput
+3. Monitor error rates
+4. Monitor connection stability
+5. Monitor message latency
+6. Monitor memory usage
+7. Monitor CPU usage
+
+9. Troubleshooting
+-----------------
+1. Check WebSocket connection status
+2. Verify authentication token
+3. Check message format
+4. Verify network connectivity
+5. Check server logs
+6. Monitor client-side errors
+7. Check browser console for errors
+
+10. Additional Features
+----------------------
+1. Typing indicators
+2. Read receipts
+3. Message delivery status
+4. File sharing
+5. Message reactions
+6. Message editing
+7. Message deletion
+8. User presence
+9. Message search
+10. Message threading 
